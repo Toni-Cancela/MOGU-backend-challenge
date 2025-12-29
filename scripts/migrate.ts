@@ -32,7 +32,7 @@ async function migrate() {
         destination VARCHAR(255) NOT NULL,
         start_date DATE NOT NULL,
         end_date DATE NOT NULL,
-        owner_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         is_public BOOLEAN NOT NULL DEFAULT FALSE,
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       )
@@ -69,12 +69,38 @@ async function migrate() {
       )
     `)
 
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS trip_permissions (
+        id SERIAL PRIMARY KEY,
+        trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        organization_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE,
+        permission VARCHAR(10) NOT NULL CHECK (permission IN ('read', 'write')),
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT check_one_target CHECK (
+          (user_id IS NOT NULL AND organization_id IS NULL) OR 
+          (user_id IS NULL AND organization_id IS NOT NULL)
+        ),
+        UNIQUE(trip_id, user_id),
+        UNIQUE(trip_id, organization_id)
+      )
+    `)
+
     // Create indexes
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)
     `)
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_trips_owner_id ON trips(owner_id)
+    `)
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_trip_permissions_trip_id ON trip_permissions(trip_id)
+    `)
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_trip_permissions_user_id ON trip_permissions(user_id)
+    `)
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_trip_permissions_org_id ON trip_permissions(organization_id)
     `)
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_bookings_trip_id ON bookings(trip_id)
