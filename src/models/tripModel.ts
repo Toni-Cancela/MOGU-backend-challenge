@@ -44,6 +44,17 @@ async function findById(id: number): Promise<Trip | undefined> {
   return result.rows[0]
 }
 
+async function findByIds(ids: number[]): Promise<Trip[]> {
+  if (ids.length === 0) {
+    return []
+  }
+
+  const placeholders = ids.map((_, index) => `$${index + 1}`).join(', ')
+  const query = `SELECT * FROM trips WHERE id IN (${placeholders}) ORDER BY created_at DESC`
+  const result = await executeQuery<Trip>(query, ids)
+  return result.rows
+}
+
 async function create(data: TripCreate, ownerId: number): Promise<Trip> {
   const query = `
     INSERT INTO trips (title, destination, start_date, end_date, owner_id, is_public)
@@ -106,6 +117,7 @@ async function remove(id: number): Promise<boolean> {
 export default {
   findAll,
   findById,
+  findByIds,
   create,
   update,
   remove,

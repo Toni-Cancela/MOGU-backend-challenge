@@ -1,25 +1,44 @@
 import { Context } from 'koa'
 import TripModel from '../models/tripModel'
+import TripPermissionModel from '../models/tripPermissionModel'
+import UserModel from '../models/userModel'
 import { tripCreateSchema, tripUpdateSchema } from '../schemas/trip'
+import { shareWithOrganizationSchema, shareWithUserSchema } from '../schemas/tripPermission'
 import { AuthContext } from './authMiddleware'
 
 export async function getTrips(ctx: Context) {
   const destination = ctx.query.destination as string | undefined
-  const trips = await TripModel.findAll({ 
+  const trips = await TripModel.findAll({
     destination,
-    is_public: true 
+    is_public: true,
   })
   ctx.body = trips
 }
 
-// Protected endpoint: Get all trips for authenticated user's organization
 export async function getMyTrips(ctx: AuthContext) {
   const destination = ctx.query.destination as string | undefined
-  const trips = await TripModel.findAll({ 
+
+  const ownedTrips = await TripModel.findAll({
     destination,
-    owner_id: ctx.user!.organization_id 
+    owner_id: ctx.user!.id,
   })
-  ctx.body = trips
+
+  const accessibleTripIds = await TripPermissionModel.findAccessibleTripIds(
+    ctx.user!.id,
+    ctx.user!.organization_id
+  )
+
+  const accessibleTrips =
+    accessibleTripIds.length > 0 ? await TripModel.findByIds(accessibleTripIds) : []
+
+  const filteredAccessibleTrips = destination
+    ? accessibleTrips.filter((trip) =>
+        trip.destination.toLowerCase().includes(destination.toLowerCase())
+      )
+    : accessibleTrips
+
+  const combined = [...ownedTrips, ...filteredAccessibleTrips]
+  ctx.body = combined
 }
 
 export async function getTrip(ctx: Context) {
@@ -32,7 +51,6 @@ export async function getTrip(ctx: Context) {
     return
   }
 
-  // Only show public trips to non-authenticated users
   if (!trip.is_public) {
     ctx.status = 404
     ctx.body = { error: 'Trip not found' }
@@ -51,7 +69,7 @@ export async function createTrip(ctx: AuthContext) {
     return
   }
 
-  const trip = await TripModel.create(validation.data, ctx.user!.organization_id)
+  const trip = await TripModel.create(validation.data, ctx.user!.id)
   ctx.status = 201
   ctx.body = trip
 }
@@ -73,14 +91,26 @@ export async function updateTrip(ctx: AuthContext) {
   }
 
   const existingTrip = await TripModel.findById(id)
-  
+
   if (!existingTrip) {
     ctx.status = 404
     ctx.body = { error: 'Trip not found' }
     return
   }
 
-  if (existingTrip.owner_id !== ctx.user!.organization_id) {
+  if (existingTrip.owner_id === ctx.user!.id) {
+    const trip = await TripModel.update(id, validation.data)
+    ctx.body = trip
+    return
+  }
+
+  const permission = await TripPermissionModel.getUserPermission(
+    id,
+    ctx.user!.id,
+    ctx.user!.organization_id
+  )
+
+  if (permission !== 'write') {
     ctx.status = 403
     ctx.body = { error: 'You do not have permission to update this trip' }
     return
@@ -101,14 +131,26 @@ export async function deleteTrip(ctx: AuthContext) {
   const id = parseInt(ctx.params.id, 10)
 
   const existingTrip = await TripModel.findById(id)
-  
+
   if (!existingTrip) {
     ctx.status = 404
     ctx.body = { error: 'Trip not found' }
     return
   }
 
-  if (existingTrip.owner_id !== ctx.user!.organization_id) {
+  if (existingTrip.owner_id === ctx.user!.id) {
+    await TripModel.remove(id)
+    ctx.status = 204
+    return
+  }
+
+  const permission = await TripPermissionModel.getUserPermission(
+    id,
+    ctx.user!.id,
+    ctx.user!.organization_id
+  )
+
+  if (permission !== 'write') {
     ctx.status = 403
     ctx.body = { error: 'You do not have permission to delete this trip' }
     return
@@ -123,4 +165,83 @@ export async function deleteTrip(ctx: AuthContext) {
   }
 
   ctx.status = 204
+}
+
+export async function shareWithOrganization(ctx: AuthContext) {
+  const tripId = parseInt(ctx.params.id, 10)
+  const validation = shareWithOrganizationSchema.safeParse(ctx.request.body)
+
+  if (!validation.success) {
+    ctx.status = 400
+    ctx.body = { error: 'Validation failed', details: validation.error.flatten().fieldErrors }
+    return
+  }
+
+  const trip = await TripModel.findById(tripId)
+
+  if (!trip) {
+    ctx.status = 404
+    ctx.body = { error: 'Trip not found' }
+    return
+  }
+
+  if (trip.owner_id !== ctx.user!.id) {
+    ctx.status = 403
+    ctx.body = { error: 'Only the trip owner can share with organization' }
+    return
+  }
+
+  const { permission } = validation.data
+
+  const tripPermission = await TripPermissionModel.setOrganizationPermission(
+    tripId,
+    ctx.user!.organization_id,
+    permission
+  )
+
+  ctx.body = {
+    message: 'Trip shared with organization successfully',
+    permission: tripPermission,
+  }
+}
+
+export async function shareWithUser(ctx: AuthContext) {
+  const tripId = parseInt(ctx.params.id, 10)
+  const validation = shareWithUserSchema.safeParse(ctx.request.body)
+
+  if (!validation.success) {
+    ctx.status = 400
+    ctx.body = { error: 'Validation failed', details: validation.error.flatten().fieldErrors }
+    return
+  }
+
+  const trip = await TripModel.findById(tripId)
+
+  if (!trip) {
+    ctx.status = 404
+    ctx.body = { error: 'Trip not found' }
+    return
+  }
+
+  if (trip.owner_id !== ctx.user!.id) {
+    ctx.status = 403
+    ctx.body = { error: 'Only the trip owner can share with users' }
+    return
+  }
+
+  const { user_id, permission } = validation.data
+
+  const targetUser = await UserModel.findById(user_id)
+  if (!targetUser) {
+    ctx.status = 404
+    ctx.body = { error: 'Target user not found' }
+    return
+  }
+
+  const tripPermission = await TripPermissionModel.setUserPermission(tripId, user_id, permission)
+
+  ctx.body = {
+    message: 'Trip shared with user successfully',
+    permission: tripPermission,
+  }
 }
