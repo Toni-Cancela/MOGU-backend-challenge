@@ -2,7 +2,9 @@ import { Context } from 'koa'
 import BookingModel from '../models/bookingModel'
 import TripModel from '../models/tripModel'
 import TravelerModel from '../models/travelerModel'
-import { bookingCreateSchema, bookingUpdateSchema } from '../schemas/booking'
+import PaymentModel from '../models/paymentModel'
+import { bookingCreateSchema, bookingUpdateSchema, BookingStatus } from '../schemas/booking'
+import { PaymentStatus } from '../schemas/payment'
 
 export async function getBookings(ctx: Context) {
   const status = ctx.query.status as string | undefined
@@ -118,4 +120,67 @@ export async function deleteBooking(ctx: Context) {
   }
 
   ctx.status = 204
+}
+
+export async function cancelBooking(ctx: Context) {
+  const id = parseInt(ctx.params.id, 10)
+  
+  const booking = await BookingModel.findById(id)
+
+  if (!booking) {
+    ctx.status = 404
+    ctx.body = { error: 'Booking not found' }
+    return
+  }
+
+  if (booking.status === BookingStatus.Cancelled) {
+    ctx.status = 400
+    ctx.body = { error: 'Booking is already cancelled' }
+    return
+  }
+
+  // Store original status for possible rollback
+  const originalStatus = booking.status
+
+  const cancelledBooking = await BookingModel.update(id, { status: BookingStatus.Cancelled })
+
+  if (!cancelledBooking) {
+    ctx.status = 500
+    ctx.body = { error: 'Failed to cancel booking' }
+    return
+  }
+
+  let refund = null
+
+  try {
+    const payments = await PaymentModel.findAll({ 
+      booking_id: id,
+      status: PaymentStatus.Completed 
+    })
+
+    if (payments.length > 0) {
+      const completedPayment = payments[0]
+      refund = await PaymentModel.create({
+        booking_id: id,
+        amount: -Math.abs(completedPayment.amount),
+        currency: completedPayment.currency,
+        status: PaymentStatus.Refunded,
+      })
+
+      if (!refund) {
+        throw new Error('Failed to create refund')
+      }
+    }
+
+    ctx.body = {
+      booking: cancelledBooking,
+      ...(refund && { refund })
+    }
+  } catch (error) {
+    // Rollback: restore original booking status
+    await BookingModel.update(id, { status: originalStatus })
+    console.error('Error creating refund:', error)
+    ctx.status = 500
+    ctx.body = { error: 'Failed to process cancellation' }
+  }
 }

@@ -40,15 +40,20 @@ async function findById(id: number): Promise<Payment | undefined> {
 
 async function create(data: PaymentCreate): Promise<Payment> {
   const query = `
-    INSERT INTO payments (booking_id, amount, currency)
-    VALUES ($1, $2, $3)
+    INSERT INTO payments (booking_id, amount, currency${data.status ? ', status' : ''})
+    VALUES ($1, $2, $3${data.status ? ', $4' : ''})
     RETURNING *
   `
-  const result = await executeQuery<Payment>(query, [
+  const params = [
     data.booking_id,
     data.amount,
     data.currency || 'EUR',
-  ])
+  ]
+  if (data.status) {
+    params.push(data.status)
+  }
+  const result = await executeQuery<Payment>(query, params
+  )
   return result.rows[0]
 }
 
