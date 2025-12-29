@@ -22,14 +22,14 @@ services:
       dockerfile: Dockerfile
     container_name: backend-challenge-api
     ports:
-      - '3000:3000'
+      - '3005:3005'
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: backend_challenge
-      PORT: 3000
+      PORT: 3005
     depends_on:
       postgres:
         condition: service_healthy
