@@ -6,7 +6,6 @@ async function migrate() {
   try {
     console.log('Running migrations...')
 
-    // Create organizations table
     await client.query(`
       CREATE TABLE IF NOT EXISTS organizations (
         id SERIAL PRIMARY KEY,
@@ -15,7 +14,6 @@ async function migrate() {
       )
     `)
 
-    // Create users table
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
@@ -27,7 +25,6 @@ async function migrate() {
       )
     `)
 
-    // Create trips table with owner_id and is_public
     await client.query(`
       CREATE TABLE IF NOT EXISTS trips (
         id SERIAL PRIMARY KEY,
