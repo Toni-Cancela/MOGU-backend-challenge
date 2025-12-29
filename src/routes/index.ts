@@ -1,4 +1,5 @@
 import Router from '@koa/router'
+import authRouter from './auth'
 import tripsRouter from './trips'
 import travelersRouter from './travelers'
 import bookingsRouter from './bookings'
@@ -12,6 +13,8 @@ router.get('/health', (ctx) => {
 })
 
 // Mount entity routers
+router.use(authRouter.routes())
+router.use(authRouter.allowedMethods())
 router.use(tripsRouter.routes())
 router.use(tripsRouter.allowedMethods())
 router.use(travelersRouter.routes())
