@@ -86,6 +86,42 @@ async function migrate() {
       )
     `)
 
+    // Alter existing tables to add new columns if they don't exist
+    await client.query(`
+      DO $$ 
+      BEGIN 
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'trips' AND column_name = 'owner_id'
+        ) THEN
+          -- Add column as nullable first
+          ALTER TABLE trips ADD COLUMN owner_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+          
+          -- Set owner_id to the first user for existing trips (if any users exist)
+          UPDATE trips 
+          SET owner_id = (SELECT id FROM users ORDER BY id LIMIT 1)
+          WHERE owner_id IS NULL;
+          
+          -- Make the column NOT NULL if there are users
+          IF EXISTS (SELECT 1 FROM users LIMIT 1) THEN
+            ALTER TABLE trips ALTER COLUMN owner_id SET NOT NULL;
+          END IF;
+        END IF;
+      END $$;
+    `)
+
+    await client.query(`
+      DO $$ 
+      BEGIN 
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'trips' AND column_name = 'is_public'
+        ) THEN
+          ALTER TABLE trips ADD COLUMN is_public BOOLEAN NOT NULL DEFAULT FALSE;
+        END IF;
+      END $$;
+    `)
+
     // Create indexes
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)
